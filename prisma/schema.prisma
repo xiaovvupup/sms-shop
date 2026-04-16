@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActivationCodeStatus {
+  unused
+  reserved
+  used
+  expired
+  disabled
+}
+
+enum SmsSessionStatus {
+  pending
+  number_acquired
+  waiting_sms
+  code_received
+  timeout
+  failed
+  cancelled
+}
+
+enum AdminRole {
+  super_admin
+  operator
+}
+
+model ActivationCode {
+  id               String               @id @default(cuid())
+  code             String               @unique @db.VarChar(14)
+  status           ActivationCodeStatus @default(unused)
+  expiresAt        DateTime?
+  reservedAt       DateTime?
+  usedAt           DateTime?
+  lastUsedAt       DateTime?
+  reservedByIp     String?              @db.VarChar(64)
+  usageCount       Int                  @default(0)
+  note             String?              @db.VarChar(120)
+  createdByAdminId String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  sessions         SmsSession[]
+
+  @@index([status, createdAt])
+  @@index([expiresAt])
+}
+
+model SmsSession {
+  id                   String           @id @default(cuid())
+  activationCodeId     String
+  providerName         String           @default("herosms")
+  providerActivationId String?          @unique
+  phoneNumber          String?          @db.VarChar(32)
+  status               SmsSessionStatus @default(pending)
+  timeoutAt            DateTime
+  startedAt            DateTime?
+  numberAcquiredAt     DateTime?
+  numberChangeCount    Int              @default(0)
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  lastPolledAt         DateTime?
+  webhookReceivedAt    DateTime?
+  pollAttempts         Int              @default(0)
+  verificationCode     String?          @db.VarChar(16)
+  verificationText     String?          @db.Text
+  failureReason        String?          @db.VarChar(120)
+  userIp               String?          @db.VarChar(64)
+  metadata             Json?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  activationCode       ActivationCode   @relation(fields: [activationCodeId], references: [id], onDelete: Restrict)
+  messages             SmsMessage[]
+
+  @@index([status, createdAt])
+  @@index([activationCodeId])
+  @@index([phoneNumber])
+}
+
+model SmsMessage {
+  id                String     @id @default(cuid())
+  sessionId         String
+  providerMessageId String?    @unique
+  text              String     @db.Text
+  code              String?    @db.VarChar(16)
+  rawPayload        Json?
+  receivedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  session           SmsSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique @db.VarChar(120)
+  passwordHash String    @db.VarChar(255)
+  name         String?   @db.VarChar(80)
+  role         AdminRole @default(operator)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String   @db.VarChar(20)
+  actorId    String?  @db.VarChar(64)
+  action     String   @db.VarChar(80)
+  entityType String   @db.VarChar(40)
+  entityId   String   @db.VarChar(64)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorType, actorId, createdAt])
+}
