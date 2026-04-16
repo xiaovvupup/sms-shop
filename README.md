@@ -1,11 +1,11 @@
 # Activation SMS Platform
 
-基于 Next.js 14 + TypeScript + Tailwind + shadcn/ui + Prisma + PostgreSQL 的激活码短信接码系统。
+基于 Next.js 14 + TypeScript + Tailwind + shadcn/ui + Prisma + PostgreSQL 的激活码sms系统。
 
 ## 功能概览
 
 - 用户输入激活码，服务端校验并防并发重复核销
-- 服务端向 HeroSMS（SMS-Activate 兼容）申请号码
+- 服务端向 SMS（SMS-Activate 兼容）申请号码
 - 前端展示手机号并每 5 秒轮询会话状态
 - 收到短信后自动提取 4-8 位验证码并展示
 - 激活码一次性使用
@@ -188,7 +188,7 @@ Dockerfile
 }
 ```
 
-## 接入 HeroSMS 说明
+## 接入 SMS 说明
 
 - `SMS_API_BASE_URL` 默认 `https://hero-sms.com/stubs/handler_api.php`
 - 号码申请：`action=getNumberV2`
