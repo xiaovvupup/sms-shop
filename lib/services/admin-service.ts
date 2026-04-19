@@ -190,5 +190,57 @@ export const adminService = {
       changed: true,
       detail: toCodeDetail(updated)
     };
+  },
+
+  async restoreActivationCodeToUnused(input: { rawCode: string; adminId: string }) {
+    const activationCode = normalizeActivationCode(input.rawCode);
+    if (!activationCode) {
+      throw new AppError("激活码格式错误，应为 12 位字母数字组合", "INVALID_ACTIVATION_CODE", 422);
+    }
+
+    const code = await activationCodeRepository.findByCode(activationCode);
+    if (!code) {
+      throw new AppError("激活码不存在", "CODE_NOT_FOUND", 404);
+    }
+
+    const now = new Date();
+    const isExpiredNow = !!code.expiresAt && code.expiresAt <= now;
+
+    if (code.status === ActivationCodeStatus.reserved) {
+      const activeSession = await smsSessionRepository.findActiveByActivationCodeId(code.id);
+      if (activeSession) {
+        throw new AppError("该激活码当前存在进行中的会话，暂不可恢复", "CODE_HAS_ACTIVE_SESSION", 409);
+      }
+    }
+
+    if (code.status === ActivationCodeStatus.unused && !isExpiredNow) {
+      return {
+        changed: false,
+        detail: toCodeDetail(code)
+      };
+    }
+
+    const updated = await activationCodeRepository.markUnused(code.id, {
+      clearExpiresAt: isExpiredNow
+    });
+    await activationCodeFileService.syncTxtSnapshot();
+    await auditLogRepository.write({
+      actorType: "admin",
+      actorId: input.adminId,
+      action: "RESTORE_ACTIVATION_CODE_TO_UNUSED",
+      entityType: "activation_code",
+      entityId: updated.id,
+      metadata: {
+        code: updated.code,
+        previousStatus: code.status,
+        nextStatus: updated.status,
+        clearedExpiredAt: isExpiredNow
+      }
+    });
+
+    return {
+      changed: true,
+      detail: toCodeDetail(updated)
+    };
   }
 };

@@ -63,6 +63,26 @@ export const activationCodeRepository = {
     });
   },
 
+  async markUnused(
+    id: string,
+    input?: {
+      clearExpiresAt?: boolean;
+    },
+    tx?: Tx
+  ) {
+    const db = tx ?? prisma;
+    return db.activationCode.update({
+      where: { id },
+      data: {
+        status: ActivationCodeStatus.unused,
+        reservedAt: null,
+        reservedByIp: null,
+        usedAt: null,
+        ...(input?.clearExpiresAt ? { expiresAt: null } : {})
+      }
+    });
+  },
+
   async markReservedById(id: string, ip: string, tx?: Tx) {
     const db = tx ?? prisma;
     return db.activationCode.update({

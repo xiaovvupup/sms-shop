@@ -42,6 +42,7 @@ export default function AdminCodesPage() {
   const [singleCode, setSingleCode] = useState("");
   const [checkingCode, setCheckingCode] = useState(false);
   const [invalidatingCode, setInvalidatingCode] = useState(false);
+  const [restoringCode, setRestoringCode] = useState(false);
   const [codeDetail, setCodeDetail] = useState<CodeDetail | null>(null);
   const [codeActionMessage, setCodeActionMessage] = useState<string | null>(null);
   const [codeActionError, setCodeActionError] = useState<string | null>(null);
@@ -152,6 +153,38 @@ export default function AdminCodesPage() {
     }
   }
 
+  async function restoreSingleCode() {
+    if (!singleCode.trim()) {
+      setCodeActionError("请输入激活码");
+      return;
+    }
+    if (!confirm("确认将该激活码恢复为可用状态（unused）吗？")) {
+      return;
+    }
+    setRestoringCode(true);
+    setCodeActionError(null);
+    setCodeActionMessage(null);
+    try {
+      const response = await fetch("/api/admin/codes/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activationCode: singleCode })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setCodeActionError(payload.message ?? "恢复操作失败");
+        return;
+      }
+      setCodeDetail(payload.data.detail as CodeDetail);
+      setCodeActionMessage(payload.message ?? (payload.data.changed ? "激活码已恢复可用" : "激活码已是可用状态"));
+      await loadData();
+    } catch {
+      setCodeActionError("网络异常，请重试");
+    } finally {
+      setRestoringCode(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -160,10 +193,12 @@ export default function AdminCodesPage() {
       <CardContent className="space-y-4">
         <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
           <div className="mb-3">
-            <h3 className="text-base font-semibold">单码状态检查 / 失效</h3>
-            <p className="text-sm text-muted-foreground">输入激活码后可立即查看状态，并可一键设为失效。</p>
+            <h3 className="text-base font-semibold">单码状态检查 / 状态调整</h3>
+            <p className="text-sm text-muted-foreground">
+              输入激活码后可立即查看状态，并可设为失效或恢复为可用状态。
+            </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
             <Input
               placeholder="输入激活码（例如 DK42BCPDPPRL）"
               value={singleCode}
@@ -174,10 +209,13 @@ export default function AdminCodesPage() {
                 }
               }}
             />
-            <Button variant="outline" onClick={checkSingleCode} disabled={checkingCode || invalidatingCode}>
+            <Button variant="outline" onClick={checkSingleCode} disabled={checkingCode || invalidatingCode || restoringCode}>
               {checkingCode ? "查询中..." : "检查状态"}
             </Button>
-            <Button onClick={invalidateSingleCode} disabled={invalidatingCode || checkingCode}>
+            <Button variant="outline" onClick={restoreSingleCode} disabled={restoringCode || checkingCode || invalidatingCode}>
+              {restoringCode ? "处理中..." : "恢复可用"}
+            </Button>
+            <Button onClick={invalidateSingleCode} disabled={invalidatingCode || checkingCode || restoringCode}>
               {invalidatingCode ? "处理中..." : "设为失效"}
             </Button>
           </div>

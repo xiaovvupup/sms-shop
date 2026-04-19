@@ -170,6 +170,7 @@ Dockerfile
 - `POST /api/admin/codes/generate`
 - `POST /api/admin/codes/check`
 - `POST /api/admin/codes/invalidate`
+- `POST /api/admin/codes/restore`
 - `GET /api/admin/codes`
 - `GET /api/admin/sessions`
 
