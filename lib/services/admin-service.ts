@@ -1,13 +1,37 @@
 import bcrypt from "bcryptjs";
 import { ActivationCodeStatus, SmsSessionStatus } from "@prisma/client";
 import { AppError } from "@/lib/core/errors";
-import { generateActivationCode } from "@/lib/core/utils";
+import { generateActivationCode, normalizeActivationCode } from "@/lib/core/utils";
 import { signAdminJwt } from "@/lib/auth/jwt";
 import { adminUserRepository } from "@/lib/repositories/admin-user-repository";
 import { activationCodeRepository } from "@/lib/repositories/activation-code-repository";
 import { smsSessionRepository } from "@/lib/repositories/sms-session-repository";
 import { auditLogRepository } from "@/lib/repositories/audit-log-repository";
 import { activationCodeFileService } from "@/lib/services/activation-code-file-service";
+
+function toCodeDetail(code: {
+  id: string;
+  code: string;
+  status: ActivationCodeStatus;
+  usageCount: number;
+  expiresAt: Date | null;
+  reservedAt: Date | null;
+  usedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: code.id,
+    code: code.code,
+    status: code.status,
+    usageCount: code.usageCount,
+    expiresAt: code.expiresAt,
+    reservedAt: code.reservedAt,
+    usedAt: code.usedAt,
+    createdAt: code.createdAt,
+    updatedAt: code.updatedAt
+  };
+}
 
 export const adminService = {
   async login(email: string, password: string) {
@@ -106,5 +130,65 @@ export const adminService = {
       query: input.query,
       status
     });
+  },
+
+  async checkActivationCode(rawCode: string) {
+    const activationCode = normalizeActivationCode(rawCode);
+    if (!activationCode) {
+      throw new AppError("激活码格式错误，应为 12 位字母数字组合", "INVALID_ACTIVATION_CODE", 422);
+    }
+
+    const code = await activationCodeRepository.findByCode(activationCode);
+    if (!code) {
+      throw new AppError("激活码不存在", "CODE_NOT_FOUND", 404);
+    }
+
+    return toCodeDetail(code);
+  },
+
+  async disableActivationCode(input: { rawCode: string; adminId: string }) {
+    const activationCode = normalizeActivationCode(input.rawCode);
+    if (!activationCode) {
+      throw new AppError("激活码格式错误，应为 12 位字母数字组合", "INVALID_ACTIVATION_CODE", 422);
+    }
+
+    const code = await activationCodeRepository.findByCode(activationCode);
+    if (!code) {
+      throw new AppError("激活码不存在", "CODE_NOT_FOUND", 404);
+    }
+
+    if (code.status === ActivationCodeStatus.disabled) {
+      return {
+        changed: false,
+        detail: toCodeDetail(code)
+      };
+    }
+
+    if (code.status === ActivationCodeStatus.used) {
+      return {
+        changed: false,
+        detail: toCodeDetail(code)
+      };
+    }
+
+    const updated = await activationCodeRepository.markDisabled(code.id);
+    await activationCodeFileService.syncTxtSnapshot();
+    await auditLogRepository.write({
+      actorType: "admin",
+      actorId: input.adminId,
+      action: "DISABLE_ACTIVATION_CODE",
+      entityType: "activation_code",
+      entityId: updated.id,
+      metadata: {
+        code: updated.code,
+        previousStatus: code.status,
+        nextStatus: updated.status
+      }
+    });
+
+    return {
+      changed: true,
+      detail: toCodeDetail(updated)
+    };
   }
 };

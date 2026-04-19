@@ -51,6 +51,18 @@ export const activationCodeRepository = {
     });
   },
 
+  async markDisabled(id: string, tx?: Tx) {
+    const db = tx ?? prisma;
+    return db.activationCode.update({
+      where: { id },
+      data: {
+        status: ActivationCodeStatus.disabled,
+        reservedAt: null,
+        reservedByIp: null
+      }
+    });
+  },
+
   async markReservedById(id: string, ip: string, tx?: Tx) {
     const db = tx ?? prisma;
     return db.activationCode.update({

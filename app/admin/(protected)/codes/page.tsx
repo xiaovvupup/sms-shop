@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatActivationCodeInput } from "@/lib/core/utils";
 
 type CodeItem = {
   id: string;
@@ -14,6 +15,18 @@ type CodeItem = {
   usageCount: number;
   expiresAt: string | null;
   createdAt: string;
+};
+
+type CodeDetail = {
+  id: string;
+  code: string;
+  status: string;
+  usageCount: number;
+  expiresAt: string | null;
+  reservedAt: string | null;
+  usedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export default function AdminCodesPage() {
@@ -26,6 +39,12 @@ export default function AdminCodesPage() {
   const [count, setCount] = useState(20);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [singleCode, setSingleCode] = useState("");
+  const [checkingCode, setCheckingCode] = useState(false);
+  const [invalidatingCode, setInvalidatingCode] = useState(false);
+  const [codeDetail, setCodeDetail] = useState<CodeDetail | null>(null);
+  const [codeActionMessage, setCodeActionMessage] = useState<string | null>(null);
+  const [codeActionError, setCodeActionError] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -71,12 +90,115 @@ export default function AdminCodesPage() {
     }
   }
 
+  async function checkSingleCode() {
+    if (!singleCode.trim()) {
+      setCodeActionError("请输入激活码");
+      return;
+    }
+    setCheckingCode(true);
+    setCodeActionError(null);
+    setCodeActionMessage(null);
+    try {
+      const response = await fetch("/api/admin/codes/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activationCode: singleCode })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setCodeDetail(null);
+        setCodeActionError(payload.message ?? "查询失败");
+        return;
+      }
+      setCodeDetail(payload.data as CodeDetail);
+      setCodeActionMessage("查询成功");
+    } catch {
+      setCodeDetail(null);
+      setCodeActionError("网络异常，请重试");
+    } finally {
+      setCheckingCode(false);
+    }
+  }
+
+  async function invalidateSingleCode() {
+    if (!singleCode.trim()) {
+      setCodeActionError("请输入激活码");
+      return;
+    }
+    if (!confirm("确认将该激活码设为失效（disabled）吗？")) {
+      return;
+    }
+    setInvalidatingCode(true);
+    setCodeActionError(null);
+    setCodeActionMessage(null);
+    try {
+      const response = await fetch("/api/admin/codes/invalidate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activationCode: singleCode })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setCodeActionError(payload.message ?? "失效操作失败");
+        return;
+      }
+      setCodeDetail(payload.data.detail as CodeDetail);
+      setCodeActionMessage(payload.message ?? (payload.data.changed ? "激活码已设为失效" : "激活码状态无需变更"));
+      await loadData();
+    } catch {
+      setCodeActionError("网络异常，请重试");
+    } finally {
+      setInvalidatingCode(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>激活码管理</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold">单码状态检查 / 失效</h3>
+            <p className="text-sm text-muted-foreground">输入激活码后可立即查看状态，并可一键设为失效。</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto]">
+            <Input
+              placeholder="输入激活码（例如 DK42BCPDPPRL）"
+              value={singleCode}
+              onChange={(e) => setSingleCode(formatActivationCodeInput(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  checkSingleCode();
+                }
+              }}
+            />
+            <Button variant="outline" onClick={checkSingleCode} disabled={checkingCode || invalidatingCode}>
+              {checkingCode ? "查询中..." : "检查状态"}
+            </Button>
+            <Button onClick={invalidateSingleCode} disabled={invalidatingCode || checkingCode}>
+              {invalidatingCode ? "处理中..." : "设为失效"}
+            </Button>
+          </div>
+          {codeDetail ? (
+            <div className="mt-4 grid grid-cols-1 gap-2 rounded-xl border border-border/50 bg-background/70 p-3 text-sm md:grid-cols-2">
+              <div>
+                激活码：<span className="font-mono">{codeDetail.code}</span>
+              </div>
+              <div>
+                状态：<Badge variant="outline">{codeDetail.status}</Badge>
+              </div>
+              <div>使用次数：{codeDetail.usageCount}</div>
+              <div>过期时间：{codeDetail.expiresAt ? new Date(codeDetail.expiresAt).toLocaleString() : "-"}</div>
+              <div>锁定时间：{codeDetail.reservedAt ? new Date(codeDetail.reservedAt).toLocaleString() : "-"}</div>
+              <div>核销时间：{codeDetail.usedAt ? new Date(codeDetail.usedAt).toLocaleString() : "-"}</div>
+            </div>
+          ) : null}
+          {codeActionMessage ? <div className="mt-3 text-sm text-emerald-700">{codeActionMessage}</div> : null}
+          {codeActionError ? <div className="mt-3 text-sm text-red-600">{codeActionError}</div> : null}
+        </div>
+
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
           <Input
             placeholder="搜索激活码/备注"
