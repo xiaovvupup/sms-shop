@@ -16,8 +16,7 @@ export default function HomePage() {
           <CardDescription className="max-w-5xl text-[15px] leading-7">
             本站不提供站内购买。你在闲鱼收到激活码后，可在这里完成核销、申请手机号并实时接收验证码。激活码仅在第一次成功领取手机号后失效。
           </CardDescription>
-          <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-3">
-            <div className="surface-muted rounded-full px-4 py-2">固定国家线路：英国🇬🇧</div>
+          <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-2">
             <div className="surface-muted rounded-full px-4 py-2">当前服务：Claude 手机验证码激活</div>
             <div className="surface-muted rounded-full px-4 py-2">默认超时：300 秒</div>
           </div>

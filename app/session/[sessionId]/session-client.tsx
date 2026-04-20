@@ -303,7 +303,7 @@ export function SessionClient({
                 {session.status === "code_received" ? "验证码已收到" : "等待短信中"}
               </h2>
               <p className="text-[15px] leading-7 text-muted-foreground">
-                请尽快把下方手机号提交到 Claude 页面。系统优先使用 webhook，失败时自动轮询兜底。
+                复制下方号码，先点击选择国家，然后黏贴号码，如果等验证码超过2分钟，可以换一个号码。
               </p>
 
               <div className="surface-muted rounded-2xl p-4">

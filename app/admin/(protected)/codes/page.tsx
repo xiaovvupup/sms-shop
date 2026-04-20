@@ -29,6 +29,13 @@ type CodeDetail = {
   updatedAt: string;
 };
 
+type SmsBalancePayload = {
+  balance: number;
+  threshold: number;
+  low: boolean;
+  mailSent: boolean;
+};
+
 export default function AdminCodesPage() {
   const [items, setItems] = useState<CodeItem[]>([]);
   const [query, setQuery] = useState("");
@@ -46,6 +53,10 @@ export default function AdminCodesPage() {
   const [codeDetail, setCodeDetail] = useState<CodeDetail | null>(null);
   const [codeActionMessage, setCodeActionMessage] = useState<string | null>(null);
   const [codeActionError, setCodeActionError] = useState<string | null>(null);
+  const [checkingBalance, setCheckingBalance] = useState(false);
+  const [balanceInfo, setBalanceInfo] = useState<SmsBalancePayload | null>(null);
+  const [balanceMessage, setBalanceMessage] = useState<string | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -185,12 +196,59 @@ export default function AdminCodesPage() {
     }
   }
 
+  async function checkSmsBalance() {
+    setCheckingBalance(true);
+    setBalanceError(null);
+    setBalanceMessage(null);
+    try {
+      const response = await fetch("/api/admin/sms/balance", {
+        method: "GET",
+        cache: "no-store"
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setBalanceError(payload.message ?? "余额查询失败");
+        return;
+      }
+      const data = payload.data as SmsBalancePayload;
+      setBalanceInfo(data);
+      if (data.low) {
+        setBalanceMessage(data.mailSent ? "余额低于阈值，已发送邮件提醒" : "余额低于阈值，请尽快充值");
+      } else {
+        setBalanceMessage("余额充足");
+      }
+    } catch {
+      setBalanceError("网络异常，请重试");
+    } finally {
+      setCheckingBalance(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>激活码管理</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold">HeroSMS 余额监控</h3>
+            <p className="text-sm text-muted-foreground">点击查询实时余额；低于阈值会触发告警（支持邮件）。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="outline" onClick={checkSmsBalance} disabled={checkingBalance}>
+              {checkingBalance ? "查询中..." : "查询 HeroSMS 余额"}
+            </Button>
+            {balanceInfo ? (
+              <div className={`rounded-full px-3 py-1 text-sm ${balanceInfo.low ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
+                当前余额：${balanceInfo.balance.toFixed(4)}（阈值：${balanceInfo.threshold.toFixed(2)}）
+              </div>
+            ) : null}
+          </div>
+          {balanceMessage ? <div className="mt-3 text-sm text-emerald-700">{balanceMessage}</div> : null}
+          {balanceError ? <div className="mt-3 text-sm text-red-600">{balanceError}</div> : null}
+        </div>
+
         <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
           <div className="mb-3">
             <h3 className="text-base font-semibold">单码状态检查 / 状态调整</h3>

@@ -1,4 +1,10 @@
 {
   "installCommand": "npm ci --include=dev",
-  "buildCommand": "npm run vercel-build"
+  "buildCommand": "npm run vercel-build",
+  "crons": [
+    {
+      "path": "/api/cron/daily-maintenance",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }

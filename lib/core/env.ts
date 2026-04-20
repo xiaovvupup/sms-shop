@@ -43,7 +43,23 @@ const envSchema = z.object({
   ADMIN_SEED_PASSWORD: z.preprocess(sanitizeEnvString, z.string().min(8).default("ChangeMe123!")),
   ADMIN_SINGLE_ACCOUNT_MODE: z.preprocess(sanitizeEnvString, z.string().default("true")).transform((value) =>
     parseBooleanEnv(value, true)
-  )
+  ),
+  AUTO_GENERATE_UNUSED_THRESHOLD: z.coerce.number().int().min(1).default(20),
+  AUTO_GENERATE_BATCH_SIZE: z.coerce.number().int().min(1).default(400),
+  LOW_BALANCE_THRESHOLD_USD: z.coerce.number().positive().default(1),
+  CRON_SECRET: z.preprocess(sanitizeEnvString, z.string().optional()),
+  MAIL_ENABLED: z.preprocess(sanitizeEnvString, z.string().default("false")).transform((value) =>
+    parseBooleanEnv(value, false)
+  ),
+  MAIL_SMTP_HOST: z.preprocess(sanitizeEnvString, z.string().optional()),
+  MAIL_SMTP_PORT: z.coerce.number().int().positive().default(587),
+  MAIL_SMTP_SECURE: z.preprocess(sanitizeEnvString, z.string().default("false")).transform((value) =>
+    parseBooleanEnv(value, false)
+  ),
+  MAIL_SMTP_USER: z.preprocess(sanitizeEnvString, z.string().optional()),
+  MAIL_SMTP_PASS: z.preprocess(sanitizeEnvString, z.string().optional()),
+  MAIL_FROM: z.preprocess(sanitizeEnvString, z.string().optional()),
+  MAIL_TO: z.preprocess(sanitizeEnvString, z.string().optional())
 });
 
 export const env = envSchema.parse(process.env);

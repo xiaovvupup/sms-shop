@@ -141,6 +141,16 @@ export const activationCodeRepository = {
     };
   },
 
+  async countAvailableUnused() {
+    const now = new Date();
+    return prisma.activationCode.count({
+      where: {
+        status: ActivationCodeStatus.unused,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      }
+    });
+  },
+
   async createMany(codes: Array<{ code: string; expiresAt?: Date; note?: string; createdByAdminId?: string }>) {
     return prisma.activationCode.createMany({
       data: codes,

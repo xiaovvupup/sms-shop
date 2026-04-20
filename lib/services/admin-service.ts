@@ -74,10 +74,10 @@ export const adminService = {
     count: number;
     expiresAt?: string;
     note?: string;
-    adminId: string;
+    adminId?: string;
   }) {
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : undefined;
-    const rows: Array<{ code: string; expiresAt?: Date; note?: string; createdByAdminId: string }> = [];
+    const rows: Array<{ code: string; expiresAt?: Date; note?: string; createdByAdminId?: string }> = [];
     const generated = new Set<string>();
     while (rows.length < input.count) {
       const code = generateActivationCode();
@@ -95,8 +95,8 @@ export const adminService = {
     const result = await activationCodeRepository.createMany(rows);
     await activationCodeFileService.syncTxtSnapshot();
     await auditLogRepository.write({
-      actorType: "admin",
-      actorId: input.adminId,
+      actorType: input.adminId ? "admin" : "system",
+      actorId: input.adminId ?? null,
       action: "GENERATE_ACTIVATION_CODES",
       entityType: "activation_code",
       entityId: "batch",

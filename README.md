@@ -10,6 +10,9 @@
 - 收到短信后自动提取 4-8 位验证码并展示
 - 激活码一次性使用
 - 管理员后台（登录、激活码管理、会话管理）
+- 管理员可单码检查、失效、恢复可用状态
+- 管理员可一键查询 HeroSMS 余额，低余额可邮件告警
+- 每日自动巡检：unused 低于阈值自动补码并邮件发送 txt
 - 支持 webhook 扩展接收短信
 - 统一 JSON 响应、日志、限流、超时处理、审计日志
 
@@ -171,12 +174,17 @@ Dockerfile
 - `POST /api/admin/codes/check`
 - `POST /api/admin/codes/invalidate`
 - `POST /api/admin/codes/restore`
+- `GET /api/admin/sms/balance`
 - `GET /api/admin/codes`
 - `GET /api/admin/sessions`
 
 ### Webhook
 
 - `POST /api/webhooks/sms`
+
+### Cron
+
+- `GET /api/cron/daily-maintenance`
 
 ## 统一 JSON 响应格式
 
@@ -213,3 +221,21 @@ Dockerfile
 - 该命令会执行 `prisma migrate deploy`，因此生产环境必须能连上 PostgreSQL
 - 如果 `DATABASE_URL` 使用了池化连接，建议额外设置 `DIRECT_URL` 为 Neon 的直连字符串，避免迁移阶段报错
 - 若只想先验证前端部署，也可以暂时把 Vercel Build Command 改为 `prisma generate && next build`，等数据库环境变量确认无误后再恢复
+- 项目内置每日定时任务（`/api/cron/daily-maintenance`），在 Vercel 中由 `vercel.json` crons 自动触发
+- 建议配置 `CRON_SECRET`，并确保 Vercel 项目也配置同名环境变量
+
+## 自动补码与邮件提醒配置
+
+可选环境变量：
+
+- `AUTO_GENERATE_UNUSED_THRESHOLD`：unused 低于该值触发自动补码（默认 `20`）
+- `AUTO_GENERATE_BATCH_SIZE`：每次自动补码数量（默认 `400`）
+- `LOW_BALANCE_THRESHOLD_USD`：低余额阈值（默认 `1`）
+- `MAIL_ENABLED`：是否启用邮件（`true/false`）
+- `MAIL_SMTP_HOST` / `MAIL_SMTP_PORT` / `MAIL_SMTP_SECURE` / `MAIL_SMTP_USER` / `MAIL_SMTP_PASS`
+- `MAIL_FROM` / `MAIL_TO`
+
+邮件启用后：
+
+- 自动补码会附带 `txt` 发送本次生成的激活码列表
+- 余额低于阈值会发送告警邮件

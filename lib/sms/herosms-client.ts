@@ -15,6 +15,11 @@ type AcquireResult = {
   raw: unknown;
 };
 
+type BalanceResult = {
+  balance: number;
+  raw: unknown;
+};
+
 class HeroSmsClient {
   private readonly baseUrl = env.SMS_API_BASE_URL;
   private readonly apiKey = env.SMS_API_KEY;
@@ -84,6 +89,41 @@ class HeroSmsClient {
     }
 
     throw new AppError("SMS 平台返回格式异常", "SMS_INVALID_RESPONSE", 502, { payload });
+  }
+
+  async getBalance(): Promise<BalanceResult> {
+    const payload = await this.request("getBalance", {});
+
+    if (typeof payload === "number" && Number.isFinite(payload)) {
+      return { balance: payload, raw: payload };
+    }
+
+    if (typeof payload === "string") {
+      const match = payload.match(/-?\d+(?:\.\d+)?/);
+      if (!match) {
+        throw new AppError("SMS 平台余额返回格式异常", "SMS_INVALID_BALANCE_RESPONSE", 502, { payload });
+      }
+      const value = Number(match[0]);
+      if (!Number.isFinite(value)) {
+        throw new AppError("SMS 平台余额返回格式异常", "SMS_INVALID_BALANCE_RESPONSE", 502, { payload });
+      }
+      return { balance: value, raw: payload };
+    }
+
+    if (payload && typeof payload === "object") {
+      const maybeBalance = (payload as { balance?: unknown }).balance;
+      if (typeof maybeBalance === "number" && Number.isFinite(maybeBalance)) {
+        return { balance: maybeBalance, raw: payload };
+      }
+      if (typeof maybeBalance === "string") {
+        const value = Number(maybeBalance);
+        if (Number.isFinite(value)) {
+          return { balance: value, raw: payload };
+        }
+      }
+    }
+
+    throw new AppError("SMS 平台余额返回格式异常", "SMS_INVALID_BALANCE_RESPONSE", 502, { payload });
   }
 
   async getStatusV2(activationId: string): Promise<SmsStatusResult> {
