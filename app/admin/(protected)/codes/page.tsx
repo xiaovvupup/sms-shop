@@ -10,6 +10,31 @@ import { formatActivationCodeInput } from "@/lib/core/utils";
 
 type CodeKind = "us" | "uk";
 
+type ProductItem = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  kind: CodeKind;
+  kindDisplayName: string;
+  amountFen: number;
+  amountYuan: string;
+  sortOrder: number;
+  isActive: boolean;
+  stock: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ProductDraft = {
+  name: string;
+  description: string;
+  kind: CodeKind;
+  priceYuan: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
 type CodeItem = {
   id: string;
   code: string;
@@ -71,6 +96,22 @@ function renderKindLabel(kind: CodeKind) {
 }
 
 export default function AdminCodesPage() {
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [productDrafts, setProductDrafts] = useState<Record<string, ProductDraft>>({});
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [creatingProduct, setCreatingProduct] = useState(false);
+  const [savingProductId, setSavingProductId] = useState<string | null>(null);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [productMessage, setProductMessage] = useState<string | null>(null);
+  const [productError, setProductError] = useState<string | null>(null);
+  const [newProduct, setNewProduct] = useState<ProductDraft>({
+    name: "",
+    description: "",
+    kind: "us",
+    priceYuan: "",
+    sortOrder: 0,
+    isActive: true
+  });
   const [items, setItems] = useState<CodeItem[]>([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -102,6 +143,36 @@ export default function AdminCodesPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  function toProductDraft(item: ProductItem): ProductDraft {
+    return {
+      name: item.name,
+      description: item.description ?? "",
+      kind: item.kind,
+      priceYuan: item.amountYuan,
+      sortOrder: item.sortOrder,
+      isActive: item.isActive
+    };
+  }
+
+  async function loadProducts() {
+    setLoadingProducts(true);
+    try {
+      const response = await fetch("/api/admin/products", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setProductError(payload.message ?? "商品列表加载失败");
+        return;
+      }
+      const data = payload.data as ProductItem[];
+      setProducts(data);
+      setProductDrafts(Object.fromEntries(data.map((item) => [item.id, toProductDraft(item)])));
+    } catch {
+      setProductError("网络异常，商品列表加载失败");
+    } finally {
+      setLoadingProducts(false);
+    }
+  }
+
   async function loadData() {
     setLoading(true);
     try {
@@ -127,6 +198,124 @@ export default function AdminCodesPage() {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, status, kind]);
+
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  function updateDraft(productId: string, patch: Partial<ProductDraft>) {
+    setProductDrafts((current) => ({
+      ...current,
+      [productId]: {
+        ...current[productId],
+        ...patch
+      }
+    }));
+  }
+
+  async function createProduct() {
+    if (!newProduct.name.trim() || !newProduct.priceYuan.trim()) {
+      setProductError("请填写商品名称和售价");
+      return;
+    }
+    setCreatingProduct(true);
+    setProductError(null);
+    setProductMessage(null);
+    try {
+      const response = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newProduct.name.trim(),
+          description: newProduct.description.trim(),
+          kind: newProduct.kind,
+          priceYuan: newProduct.priceYuan,
+          sortOrder: newProduct.sortOrder,
+          isActive: newProduct.isActive
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setProductError(payload.message ?? "商品创建失败");
+        return;
+      }
+      setNewProduct({
+        name: "",
+        description: "",
+        kind: "us",
+        priceYuan: "",
+        sortOrder: 0,
+        isActive: true
+      });
+      setProductMessage("商品已创建");
+      await loadProducts();
+    } catch {
+      setProductError("网络异常，请重试");
+    } finally {
+      setCreatingProduct(false);
+    }
+  }
+
+  async function saveProduct(productId: string) {
+    const draft = productDrafts[productId];
+    if (!draft || !draft.name.trim() || !draft.priceYuan.trim()) {
+      setProductError("请先补全商品名称和售价");
+      return;
+    }
+    setSavingProductId(productId);
+    setProductError(null);
+    setProductMessage(null);
+    try {
+      const response = await fetch(`/api/admin/products/${productId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: draft.name.trim(),
+          description: draft.description.trim(),
+          kind: draft.kind,
+          priceYuan: draft.priceYuan,
+          sortOrder: draft.sortOrder,
+          isActive: draft.isActive
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setProductError(payload.message ?? "商品更新失败");
+        return;
+      }
+      setProductMessage("商品已更新");
+      await loadProducts();
+    } catch {
+      setProductError("网络异常，请重试");
+    } finally {
+      setSavingProductId(null);
+    }
+  }
+
+  async function deleteProduct(productId: string) {
+    if (!confirm("确认删除这个商品吗？删除后用户端将不再显示。")) {
+      return;
+    }
+    setDeletingProductId(productId);
+    setProductError(null);
+    setProductMessage(null);
+    try {
+      const response = await fetch(`/api/admin/products/${productId}`, {
+        method: "DELETE"
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setProductError(payload.message ?? "商品删除失败");
+        return;
+      }
+      setProductMessage("商品已删除");
+      await loadProducts();
+    } catch {
+      setProductError("网络异常，请重试");
+    } finally {
+      setDeletingProductId(null);
+    }
+  }
 
   async function generateCodes() {
     setCreating(true);
@@ -335,6 +524,160 @@ export default function AdminCodesPage() {
         <CardTitle>激活码管理</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold">商品管理</h3>
+            <p className="text-sm text-muted-foreground">可自由新增商品、修改售价或删除商品。用户端会按商品绑定地区自动显示对应库存。</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 rounded-2xl border border-border/50 bg-background/60 p-4 xl:grid-cols-[1.2fr_1.4fr_180px_160px_120px_auto]">
+            <Input
+              placeholder="商品名称"
+              value={newProduct.name}
+              onChange={(e) => setNewProduct((current) => ({ ...current, name: e.target.value }))}
+            />
+            <Input
+              placeholder="商品说明（可选）"
+              value={newProduct.description}
+              onChange={(e) => setNewProduct((current) => ({ ...current, description: e.target.value }))}
+            />
+            <select
+              className="h-11 rounded-xl border border-border bg-background px-3 text-sm"
+              value={newProduct.kind}
+              onChange={(e) => setNewProduct((current) => ({ ...current, kind: e.target.value as CodeKind }))}
+            >
+              {KIND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <Input
+              type="number"
+              step="0.01"
+              min="0.01"
+              placeholder="售价（元）"
+              value={newProduct.priceYuan}
+              onChange={(e) => setNewProduct((current) => ({ ...current, priceYuan: e.target.value }))}
+            />
+            <Input
+              type="number"
+              min="0"
+              placeholder="排序"
+              value={newProduct.sortOrder}
+              onChange={(e) => setNewProduct((current) => ({ ...current, sortOrder: Number(e.target.value) || 0 }))}
+            />
+            <Button onClick={createProduct} disabled={creatingProduct}>
+              {creatingProduct ? "创建中..." : "新增商品"}
+            </Button>
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>商品名称</TableHead>
+                  <TableHead>商品说明</TableHead>
+                  <TableHead>地区</TableHead>
+                  <TableHead>售价</TableHead>
+                  <TableHead>库存</TableHead>
+                  <TableHead>排序</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {products.map((product) => {
+                  const draft = productDrafts[product.id] ?? toProductDraft(product);
+                  return (
+                    <TableRow key={product.id}>
+                      <TableCell>
+                        <Input value={draft.name} onChange={(e) => updateDraft(product.id, { name: e.target.value })} />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={draft.description}
+                          onChange={(e) => updateDraft(product.id, { description: e.target.value })}
+                          placeholder="可选"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          className="h-11 rounded-xl border border-border bg-background px-3 text-sm"
+                          value={draft.kind}
+                          onChange={(e) => updateDraft(product.id, { kind: e.target.value as CodeKind })}
+                        >
+                          {KIND_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          value={draft.priceYuan}
+                          onChange={(e) => updateDraft(product.id, { priceYuan: e.target.value })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={product.stock > 0 ? "success" : "danger"}>{product.stock}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={draft.sortOrder}
+                          onChange={(e) => updateDraft(product.id, { sortOrder: Number(e.target.value) || 0 })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={draft.isActive}
+                            onChange={(e) => updateDraft(product.id, { isActive: e.target.checked })}
+                          />
+                          {draft.isActive ? "上架中" : "已下架"}
+                        </label>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => saveProduct(product.id)}
+                            disabled={savingProductId === product.id || deletingProductId === product.id}
+                          >
+                            {savingProductId === product.id ? "保存中..." : "保存"}
+                          </Button>
+                          <Button
+                            onClick={() => deleteProduct(product.id)}
+                            disabled={deletingProductId === product.id || savingProductId === product.id}
+                          >
+                            {deletingProductId === product.id ? "删除中..." : "删除"}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!loadingProducts && products.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                      暂无商品
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
+          {productMessage ? <div className="mt-3 text-sm text-emerald-700">{productMessage}</div> : null}
+          {productError ? <div className="mt-3 text-sm text-red-600">{productError}</div> : null}
+        </div>
+
         <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
           <div className="mb-3">
             <h3 className="text-base font-semibold">HeroSMS 余额监控</h3>

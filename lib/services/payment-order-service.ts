@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db/prisma";
 import { activationCodeRepository } from "@/lib/repositories/activation-code-repository";
 import { auditLogRepository } from "@/lib/repositories/audit-log-repository";
 import { zPayClient } from "@/lib/payments/zpay-client";
+import { productService } from "@/lib/services/product-service";
 
 type PaymentOrderWithCode = PaymentOrder & {
   activationCode: {
@@ -31,19 +32,19 @@ function generateOrderNo() {
   return `PO${stamp}${suffix}`;
 }
 
-function buildQrPayload(kind: ActivationCodeKind, orderNo: string) {
+function buildQrPayload(kind: ActivationCodeKind, orderNo: string, amountFen: number) {
   const meta = getActivationKindMeta(kind);
   const payload = meta.paymentQrPayload;
   if (payload?.trim()) {
     return payload
       .replace(/\{\{orderNo\}\}/g, orderNo)
-      .replace(/\{\{amount\}\}/g, formatFenToYuan(meta.amountFen));
+      .replace(/\{\{amount\}\}/g, formatFenToYuan(amountFen));
   }
 
   return [
     meta.paymentQrLabel,
     `订单号：${orderNo}`,
-    `金额：${formatFenToYuan(meta.amountFen)} 元`
+    `金额：${formatFenToYuan(amountFen)} 元`
   ].join("\n");
 }
 
@@ -51,9 +52,8 @@ function getZPayNotifyUrl() {
   return new URL("/api/webhooks/payment/zpay", env.APP_BASE_URL).toString();
 }
 
-function buildOrderName(kind: ActivationCodeKind) {
-  const meta = getActivationKindMeta(kind);
-  return `${env.PAYMENT_SITE_NAME} ${meta.label}激活码`.slice(0, 64);
+function buildOrderName(productName: string) {
+  return `${env.PAYMENT_SITE_NAME} ${productName}`.slice(0, 64);
 }
 
 function toDismissStorageKey(orderId: string) {
@@ -71,7 +71,7 @@ async function buildQrResult(input: {
         margin: 1,
         width: 300
       })
-    : await QRCode.toDataURL(buildQrPayload(input.order.kind, input.order.orderNo), {
+    : await QRCode.toDataURL(buildQrPayload(input.order.kind, input.order.orderNo, input.order.amountFen), {
         margin: 1,
         width: 300
       });
@@ -81,7 +81,7 @@ async function buildQrResult(input: {
     qrCodeImageUrl: input.qrImageUrl,
     qrCodeSourceUrl: input.qrSourceUrl
       ? input.qrSourceUrl
-      : buildQrPayload(input.order.kind, input.order.orderNo),
+      : buildQrPayload(input.order.kind, input.order.orderNo, input.order.amountFen),
     paymentConfigured: input.paymentConfigured
   };
 }
@@ -90,6 +90,7 @@ async function toPaymentOrderView(order: PaymentOrderWithCode) {
   const meta = getActivationKindMeta(order.kind);
   const orderMetadata =
     order.metadata && typeof order.metadata === "object" ? (order.metadata as Record<string, unknown>) : {};
+  const productName = typeof orderMetadata.productName === "string" ? orderMetadata.productName : `${meta.label}激活码`;
   const qrSourceUrl =
     typeof orderMetadata.qrCodeUrl === "string"
       ? orderMetadata.qrCodeUrl
@@ -108,6 +109,7 @@ async function toPaymentOrderView(order: PaymentOrderWithCode) {
     orderId: order.id,
     orderNo: order.orderNo,
     kind: order.kind,
+    productName,
     kindLabel: meta.label,
     kindDisplayName: `${meta.label}${meta.emojiFlag}`,
     amountFen: order.amountFen,
@@ -169,19 +171,19 @@ async function findOrderByOrderNoOrThrow(orderNo: string, db: Prisma.Transaction
 }
 
 export const paymentOrderService = {
-  async createOrder(kind: ActivationCodeKind, paymentMethod: "alipay" | "wxpay", userIp: string) {
+  async createOrder(productId: string, paymentMethod: "alipay" | "wxpay", userIp: string) {
     if (paymentMethod !== "alipay") {
       throw new AppError("微信支付暂未接入，建议使用支付宝支付", "PAYMENT_METHOD_NOT_SUPPORTED", 422);
     }
-
-    const meta = getActivationKindMeta(kind);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let provisionalOrderId: string | null = null;
       try {
         const order = await prisma.$transaction(
           async (tx) => {
-            const activationCode = await activationCodeRepository.findFirstAvailableForKind(kind, tx);
+            const product = await productService.findActiveProductOrThrow(productId, tx);
+            const meta = getActivationKindMeta(product.kind);
+            const activationCode = await activationCodeRepository.findFirstAvailableForKind(product.kind, tx);
             if (!activationCode) {
               throw new AppError(`${meta.label}激活码暂时缺货，请稍后再试`, "ACTIVATION_CODE_OUT_OF_STOCK", 409);
             }
@@ -189,11 +191,15 @@ export const paymentOrderService = {
             const order = await tx.paymentOrder.create({
               data: {
                 orderNo: generateOrderNo(),
-                kind,
-                amountFen: meta.amountFen,
+                kind: product.kind,
+                amountFen: product.amountFen,
                 paymentChannel: paymentMethod,
                 userIp,
-                expiresAt: new Date(Date.now() + env.PAYMENT_ORDER_EXPIRE_MINUTES * 60_000)
+                expiresAt: new Date(Date.now() + env.PAYMENT_ORDER_EXPIRE_MINUTES * 60_000),
+                metadata: {
+                  productId: product.id,
+                  productName: product.name
+                }
               },
               include: {
                 activationCode: {
@@ -230,9 +236,13 @@ export const paymentOrderService = {
 
         let finalOrder = order;
         if (zPayClient.isConfigured()) {
+          const metadata =
+            order.metadata && typeof order.metadata === "object" ? (order.metadata as Record<string, unknown>) : {};
+          const productName =
+            typeof metadata.productName === "string" ? metadata.productName : `${getActivationKindMeta(order.kind).label}激活码`;
           const upstream = await zPayClient.createOrder({
             outTradeNo: order.orderNo,
-            name: buildOrderName(kind),
+            name: buildOrderName(productName),
             money: formatFenToYuan(order.amountFen),
             notifyUrl: getZPayNotifyUrl(),
             clientIp: userIp,
@@ -246,6 +256,7 @@ export const paymentOrderService = {
               paymentChannel: paymentMethod,
               providerTradeNo: upstream.providerTradeNo,
               metadata: {
+                ...metadata,
                 provider: "zpay",
                 qrCodeUrl: upstream.qrCodeUrl,
                 qrImageUrl: upstream.qrImageUrl,
@@ -273,7 +284,8 @@ export const paymentOrderService = {
           entityId: finalOrder.id,
           metadata: {
             orderNo: finalOrder.orderNo,
-            kind,
+            kind: finalOrder.kind,
+            productId,
             amountFen: finalOrder.amountFen,
             paymentMethod
           }

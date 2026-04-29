@@ -73,6 +73,49 @@ async function main() {
       skipDuplicates: true
     });
   }
+
+  await Promise.all([
+    prisma.product.upsert({
+      where: { slug: "us-default" },
+      update: {
+        name: "美国激活码",
+        description: "1 开头号码",
+        kind: "us",
+        amountFen: 880,
+        sortOrder: 10,
+        isActive: true
+      },
+      create: {
+        slug: "us-default",
+        name: "美国激活码",
+        description: "1 开头号码",
+        kind: "us",
+        amountFen: 880,
+        sortOrder: 10,
+        isActive: true
+      }
+    }),
+    prisma.product.upsert({
+      where: { slug: "uk-default" },
+      update: {
+        name: "英国激活码",
+        description: "44 开头号码",
+        kind: "uk",
+        amountFen: 388,
+        sortOrder: 20,
+        isActive: true
+      },
+      create: {
+        slug: "uk-default",
+        name: "英国激活码",
+        description: "44 开头号码",
+        kind: "uk",
+        amountFen: 388,
+        sortOrder: 20,
+        isActive: true
+      }
+    })
+  ]);
 }
 
 main()

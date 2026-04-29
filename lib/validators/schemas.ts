@@ -41,9 +41,20 @@ export const smsWebhookSchema = z.object({
 });
 
 export const createPaymentOrderSchema = z.object({
-  kind: activationCodeKindEnum,
+  productId: z.string().min(1).max(64),
   paymentMethod: paymentMethodEnum
 });
+
+export const productCreateSchema = z.object({
+  name: z.string().min(1).max(80),
+  description: z.string().max(160).optional(),
+  kind: activationCodeKindEnum,
+  priceYuan: z.coerce.number().positive().max(99999),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
+  isActive: z.coerce.boolean().default(true)
+});
+
+export const productUpdateSchema = productCreateSchema;
 
 export const paymentOrderActionSchema = z.object({
   orderId: z.string().min(1).max(64)

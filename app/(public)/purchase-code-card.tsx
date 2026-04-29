@@ -9,9 +9,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 type Kind = "us" | "uk";
 type PaymentMethod = "alipay" | "wxpay";
 
+type ProductPayload = {
+  id: string;
+  name: string;
+  description: string | null;
+  kind: Kind;
+  kindLabel: string;
+  kindDisplayName: string;
+  emojiFlag: string;
+  phonePrefixHint: string;
+  amountFen: number;
+  amountYuan: string;
+  stock: number;
+  soldOut: boolean;
+  sortOrder: number;
+};
+
 type PurchaseOrderPayload = {
   orderId: string;
   orderNo: string;
+  productName: string;
   kind: Kind;
   kindLabel: string;
   kindDisplayName: string;
@@ -32,28 +49,16 @@ type PurchaseOrderPayload = {
   activationCode: string | null;
 };
 
-const OPTIONS: Array<{ kind: Kind; title: string; subtitle: string; amount: string; accent: string }> = [
-  {
-    kind: "us",
-    title: "美国 🇺🇸",
-    subtitle: "1 开头号码，售价 8.8 元",
-    amount: "8.8",
-    accent: "from-[#0f3b6f] via-[#1f5d98] to-[#b22234]"
-  },
-  {
-    kind: "uk",
-    title: "英国 🇬🇧",
-    subtitle: "44 开头号码，售价 3.88 元",
-    amount: "3.88",
-    accent: "from-[#143c7d] via-[#1f5fbf] to-[#c8102e]"
-  }
-];
-
 const STATUS_META: Record<PurchaseOrderPayload["status"], { label: string; variant: "warning" | "success" | "danger" }> = {
   pending: { label: "等待付款", variant: "warning" },
   delivered: { label: "付款成功", variant: "success" },
   expired: { label: "订单已过期", variant: "danger" },
   cancelled: { label: "订单已取消", variant: "danger" }
+};
+
+const KIND_ACCENT: Record<Kind, string> = {
+  us: "from-[#0f3b6f] via-[#1f5d98] to-[#b22234]",
+  uk: "from-[#143c7d] via-[#1f5fbf] to-[#c8102e]"
 };
 
 function readDismissed(order: PurchaseOrderPayload) {
@@ -72,10 +77,50 @@ function readDismissed(order: PurchaseOrderPayload) {
 }
 
 export function PurchaseCodeCard() {
+  const [products, setProducts] = useState<ProductPayload[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [order, setOrder] = useState<PurchaseOrderPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProducts() {
+      setProductsLoading(true);
+      setProductsError(null);
+      try {
+        const response = await fetch("/api/products", { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          if (!cancelled) {
+            setProducts([]);
+            setProductsError(payload.message ?? "商品加载失败");
+          }
+          return;
+        }
+        if (!cancelled) {
+          setProducts(payload.data as ProductPayload[]);
+        }
+      } catch {
+        if (!cancelled) {
+          setProducts([]);
+          setProductsError("网络异常，商品信息加载失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setProductsLoading(false);
+        }
+      }
+    }
+
+    loadProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!order || order.status !== "pending") {
@@ -97,8 +142,8 @@ export function PurchaseCodeCard() {
     return () => window.clearInterval(timer);
   }, [order]);
 
-  async function createOrder(kind: Kind, paymentMethod: PaymentMethod) {
-    const key = `${kind}:${paymentMethod}`;
+  async function createOrder(product: ProductPayload, paymentMethod: PaymentMethod) {
+    const key = `${product.id}:${paymentMethod}`;
     setLoadingKey(key);
     setError(null);
     setCopied(null);
@@ -108,7 +153,7 @@ export function PurchaseCodeCard() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ kind, paymentMethod })
+        body: JSON.stringify({ productId: product.id, paymentMethod })
       });
       const payload = await response.json();
       if (!response.ok || !payload.success) {
@@ -153,34 +198,53 @@ export function PurchaseCodeCard() {
           </Badge>
           <CardTitle className="text-2xl md:text-3xl">支付获取激活码</CardTitle>
           <CardDescription className="text-[15px] leading-7">
-            现在支持 ZPay 支付宝支付。按地区选择后即可创建支付宝订单，支付成功后系统会自动发放对应地区激活码。
+            商品与售价可由后台实时管理，支付成功后系统会自动发放对应地区激活码；当前页面会同步展示每个商品可用库存。
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {OPTIONS.map((option) => (
+          {productsLoading ? (
+            <div className="col-span-full rounded-[28px] border border-white/70 bg-white/70 p-8 text-center text-sm text-muted-foreground">
+              <Loader2 className="mx-auto mb-3 size-5 animate-spin" />
+              正在加载商品与库存...
+            </div>
+          ) : null}
+          {!productsLoading && products.length === 0 ? (
+            <div className="col-span-full rounded-[28px] border border-dashed border-border/70 bg-white/60 p-8 text-center text-sm text-muted-foreground">
+              当前暂无可售商品，请先到后台新增并启用商品。
+            </div>
+          ) : null}
+          {products.map((product) => (
             <div
-              key={option.kind}
+              key={product.id}
               className="surface-card elevate-on-hover rounded-[28px] border border-white/70 p-5 text-left"
             >
               <div
-                className={`mb-4 rounded-[24px] bg-gradient-to-br ${option.accent} px-4 py-5 text-white shadow-[0_18px_38px_-22px_rgba(0,0,0,0.52)]`}
+                className={`mb-4 rounded-[24px] bg-gradient-to-br ${KIND_ACCENT[product.kind]} px-4 py-5 text-white shadow-[0_18px_38px_-22px_rgba(0,0,0,0.52)]`}
               >
                 <div className="text-sm uppercase tracking-[0.2em] text-white/80">Activation Code</div>
-                <div className="mt-3 text-3xl font-bold">{option.amount} 元</div>
+                <div className="mt-3 text-3xl font-bold">{product.amountYuan} 元</div>
               </div>
               <div className="space-y-2">
-                <div className="text-xl font-semibold">{option.title}</div>
-                <div className="text-sm leading-6 text-muted-foreground">{option.subtitle}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-xl font-semibold">{product.name}</div>
+                  <Badge variant="outline">{product.kindDisplayName}</Badge>
+                  <Badge variant={product.soldOut ? "danger" : "success"}>{product.soldOut ? "库存不足" : `库存 ${product.stock}`}</Badge>
+                </div>
+                <div className="text-sm leading-6 text-muted-foreground">
+                  {product.description?.trim()
+                    ? product.description
+                    : `${product.phonePrefixHint} 开头号码，售价 ${product.amountYuan} 元`}
+                </div>
               </div>
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Button
                   type="button"
                   className="h-11 w-full"
-                  onClick={() => createOrder(option.kind, "alipay")}
-                  disabled={loadingKey !== null}
+                  onClick={() => createOrder(product, "alipay")}
+                  disabled={loadingKey !== null || product.soldOut}
                 >
-                  {loadingKey === `${option.kind}:alipay` ? <Loader2 className="size-4 animate-spin" /> : <WalletCards className="size-4" />}
-                  支付宝支付
+                  {loadingKey === `${product.id}:alipay` ? <Loader2 className="size-4 animate-spin" /> : <WalletCards className="size-4" />}
+                  {product.soldOut ? "库存不足" : "支付宝支付"}
                 </Button>
                 <Button
                   type="button"
@@ -199,6 +263,7 @@ export function PurchaseCodeCard() {
             </div>
           ))}
         </CardContent>
+        {productsError ? <div className="px-6 pb-2 text-sm text-red-600">{productsError}</div> : null}
         {error ? <div className="px-6 pb-6 text-sm text-red-600">{error}</div> : null}
       </Card>
 
@@ -213,7 +278,7 @@ export function PurchaseCodeCard() {
                   <Badge variant="outline">{order.paymentMethodLabel}</Badge>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <h3 className="text-2xl font-bold md:text-3xl">订单 {order.orderNo}</h3>
+                  <h3 className="text-2xl font-bold md:text-3xl">{order.productName} · 订单 {order.orderNo}</h3>
                   <Button
                     type="button"
                     variant="outline"

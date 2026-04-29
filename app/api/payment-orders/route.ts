@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = createPaymentOrderSchema.parse(await request.json());
-    const data = await paymentOrderService.createOrder(body.kind, body.paymentMethod, ip);
+    const data = await paymentOrderService.createOrder(body.productId, body.paymentMethod, ip);
     return apiSuccess(requestId, data, "支付订单创建成功");
   } catch (error) {
     return handleRouteError(error, requestId);

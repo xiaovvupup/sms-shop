@@ -43,6 +43,22 @@ enum PaymentOrderStatus {
   cancelled
 }
 
+model Product {
+  id          String             @id @default(cuid())
+  slug        String             @unique @db.VarChar(60)
+  name        String             @db.VarChar(80)
+  description String?            @db.VarChar(160)
+  kind        ActivationCodeKind
+  amountFen   Int
+  sortOrder   Int                @default(0)
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([kind, isActive, sortOrder, createdAt])
+}
+
 model ActivationCode {
   id               String               @id @default(cuid())
   code             String               @unique @db.VarChar(14)
