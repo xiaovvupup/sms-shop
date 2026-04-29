@@ -8,18 +8,23 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatActivationCodeInput } from "@/lib/core/utils";
 
+type CodeKind = "us" | "uk";
+
 type CodeItem = {
   id: string;
   code: string;
+  kind: CodeKind;
   status: string;
   usageCount: number;
   expiresAt: string | null;
   createdAt: string;
+  issuedPaymentOrderId: string | null;
 };
 
 type CodeDetail = {
   id: string;
   code: string;
+  kind: CodeKind;
   status: string;
   usageCount: number;
   expiresAt: string | null;
@@ -27,6 +32,7 @@ type CodeDetail = {
   usedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  issuedPaymentOrderId: string | null;
 };
 
 type SmsBalancePayload = {
@@ -36,14 +42,44 @@ type SmsBalancePayload = {
   mailSent: boolean;
 };
 
+type PaymentOrderDetail = {
+  orderId: string;
+  orderNo: string;
+  kind: CodeKind;
+  kindDisplayName: string;
+  amountYuan: string;
+  status: "pending" | "delivered" | "expired" | "cancelled";
+  expiresAt: string;
+  deliveredAt: string | null;
+  activationCode: string | null;
+};
+
+const KIND_OPTIONS: Array<{ value: CodeKind; label: string }> = [
+  { value: "us", label: "美国 🇺🇸" },
+  { value: "uk", label: "英国 🇬🇧" }
+];
+
+const STATUS_META: Record<PaymentOrderDetail["status"], { label: string; variant: "warning" | "success" | "danger" }> = {
+  pending: { label: "待到账", variant: "warning" },
+  delivered: { label: "已发码", variant: "success" },
+  expired: { label: "已过期", variant: "danger" },
+  cancelled: { label: "已取消", variant: "danger" }
+};
+
+function renderKindLabel(kind: CodeKind) {
+  return kind === "us" ? "美国 🇺🇸" : "英国 🇬🇧";
+}
+
 export default function AdminCodesPage() {
   const [items, setItems] = useState<CodeItem[]>([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
+  const [kind, setKind] = useState<"all" | CodeKind>("all");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [pageSize] = useState(20);
   const [count, setCount] = useState(20);
+  const [generateKind, setGenerateKind] = useState<CodeKind>("us");
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [singleCode, setSingleCode] = useState("");
@@ -57,6 +93,12 @@ export default function AdminCodesPage() {
   const [balanceInfo, setBalanceInfo] = useState<SmsBalancePayload | null>(null);
   const [balanceMessage, setBalanceMessage] = useState<string | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [paymentKeyword, setPaymentKeyword] = useState("");
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [paymentDetail, setPaymentDetail] = useState<PaymentOrderDetail | null>(null);
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -69,6 +111,7 @@ export default function AdminCodesPage() {
         status
       });
       if (query.trim()) search.set("query", query.trim());
+      if (kind !== "all") search.set("kind", kind);
       const response = await fetch(`/api/admin/codes?${search.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       if (response.ok && payload.success) {
@@ -83,7 +126,7 @@ export default function AdminCodesPage() {
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, status]);
+  }, [page, status, kind]);
 
   async function generateCodes() {
     setCreating(true);
@@ -91,7 +134,7 @@ export default function AdminCodesPage() {
       const response = await fetch("/api/admin/codes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count })
+        body: JSON.stringify({ count, kind: generateKind })
       });
       const payload = await response.json();
       if (response.ok && payload.success) {
@@ -224,6 +267,68 @@ export default function AdminCodesPage() {
     }
   }
 
+  async function checkPaymentOrder() {
+    if (!paymentKeyword.trim()) {
+      setPaymentError("请输入订单号");
+      return;
+    }
+    setCheckingPayment(true);
+    setPaymentError(null);
+    setPaymentMessage(null);
+    try {
+      const response = await fetch("/api/admin/payment-orders/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: paymentKeyword.trim() })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setPaymentDetail(null);
+        setPaymentError(payload.message ?? "订单查询失败");
+        return;
+      }
+      setPaymentDetail(payload.data as PaymentOrderDetail);
+      setPaymentMessage("订单查询成功");
+    } catch {
+      setPaymentDetail(null);
+      setPaymentError("网络异常，请重试");
+    } finally {
+      setCheckingPayment(false);
+    }
+  }
+
+  async function confirmPaymentOrder() {
+    if (!paymentDetail?.orderId) {
+      setPaymentError("请先查询订单");
+      return;
+    }
+    if (!confirm("确认该订单已经到账并立即发放激活码吗？")) {
+      return;
+    }
+    setConfirmingPayment(true);
+    setPaymentError(null);
+    setPaymentMessage(null);
+    try {
+      const response = await fetch("/api/admin/payment-orders/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: paymentDetail.orderId })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setPaymentError(payload.message ?? "确认到账失败");
+        return;
+      }
+      setPaymentDetail(payload.data as PaymentOrderDetail);
+      setPaymentMessage("订单已确认到账并发码");
+      await loadData();
+    } catch {
+      setPaymentError("网络异常，请重试");
+    } finally {
+      setConfirmingPayment(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -251,9 +356,53 @@ export default function AdminCodesPage() {
 
         <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
           <div className="mb-3">
+            <h3 className="text-base font-semibold">付款订单查单 / 手动确认到账</h3>
+            <p className="text-sm text-muted-foreground">
+              用户付款后若未自动发码，可通过订单号查单并手动确认到账，系统会立即发放已锁定的对应地区激活码。
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto]">
+            <Input
+              placeholder="输入订单号或订单 ID"
+              value={paymentKeyword}
+              onChange={(e) => setPaymentKeyword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  checkPaymentOrder();
+                }
+              }}
+            />
+            <Button variant="outline" onClick={checkPaymentOrder} disabled={checkingPayment || confirmingPayment}>
+              {checkingPayment ? "查询中..." : "查询订单"}
+            </Button>
+            <Button onClick={confirmPaymentOrder} disabled={!paymentDetail || confirmingPayment || checkingPayment}>
+              {confirmingPayment ? "处理中..." : "确认到账并发码"}
+            </Button>
+          </div>
+          {paymentDetail ? (
+            <div className="mt-4 grid grid-cols-1 gap-2 rounded-xl border border-border/50 bg-background/70 p-3 text-sm md:grid-cols-2">
+              <div>订单号：{paymentDetail.orderNo}</div>
+              <div>
+                状态：<Badge variant={STATUS_META[paymentDetail.status].variant}>{STATUS_META[paymentDetail.status].label}</Badge>
+              </div>
+              <div>地区：{paymentDetail.kindDisplayName}</div>
+              <div>金额：{paymentDetail.amountYuan} 元</div>
+              <div>过期时间：{new Date(paymentDetail.expiresAt).toLocaleString()}</div>
+              <div>发码时间：{paymentDetail.deliveredAt ? new Date(paymentDetail.deliveredAt).toLocaleString() : "-"}</div>
+              <div className="md:col-span-2">
+                激活码：{paymentDetail.activationCode ? <span className="font-mono">{paymentDetail.activationCode}</span> : "-"}
+              </div>
+            </div>
+          ) : null}
+          {paymentMessage ? <div className="mt-3 text-sm text-emerald-700">{paymentMessage}</div> : null}
+          {paymentError ? <div className="mt-3 text-sm text-red-600">{paymentError}</div> : null}
+        </div>
+
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3">
             <h3 className="text-base font-semibold">单码状态检查 / 状态调整</h3>
             <p className="text-sm text-muted-foreground">
-              输入激活码后可立即查看状态，并可设为失效或恢复为可用状态。
+              输入激活码后可立即查看状态、国家类型和绑定订单，并可设为失效或恢复为可用状态。
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
@@ -285,17 +434,43 @@ export default function AdminCodesPage() {
               <div>
                 状态：<Badge variant="outline">{codeDetail.status}</Badge>
               </div>
+              <div>地区：{renderKindLabel(codeDetail.kind)}</div>
               <div>使用次数：{codeDetail.usageCount}</div>
               <div>过期时间：{codeDetail.expiresAt ? new Date(codeDetail.expiresAt).toLocaleString() : "-"}</div>
               <div>锁定时间：{codeDetail.reservedAt ? new Date(codeDetail.reservedAt).toLocaleString() : "-"}</div>
               <div>核销时间：{codeDetail.usedAt ? new Date(codeDetail.usedAt).toLocaleString() : "-"}</div>
+              <div>支付订单：{codeDetail.issuedPaymentOrderId ?? "-"}</div>
             </div>
           ) : null}
           {codeActionMessage ? <div className="mt-3 text-sm text-emerald-700">{codeActionMessage}</div> : null}
           {codeActionError ? <div className="mt-3 text-sm text-red-600">{codeActionError}</div> : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold">批量生成激活码</h3>
+            <p className="text-sm text-muted-foreground">可分别为美国和英国批量补码，生成后的激活码将直接写入数据库。</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[200px_160px_auto]">
+            <select
+              className="h-11 rounded-xl border border-border bg-background px-3 text-sm"
+              value={generateKind}
+              onChange={(e) => setGenerateKind(e.target.value as CodeKind)}
+            >
+              {KIND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <Input type="number" min={1} max={500} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+            <Button onClick={generateCodes} disabled={creating}>
+              {creating ? "生成中..." : "批量生成"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
           <Input
             placeholder="搜索激活码/备注"
             value={query}
@@ -322,16 +497,21 @@ export default function AdminCodesPage() {
             <option value="expired">expired</option>
             <option value="disabled">disabled</option>
           </select>
-          <Input type="number" min={1} max={500} value={count} onChange={(e) => setCount(Number(e.target.value))} />
-          <Button onClick={generateCodes} disabled={creating}>
-            {creating ? "生成中..." : "批量生成"}
-          </Button>
-        </div>
-
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => loadData()} disabled={loading}>
-            {loading ? "刷新中..." : "刷新"}
-          </Button>
+          <select
+            className="h-11 rounded-xl border border-border bg-background px-3 text-sm"
+            value={kind}
+            onChange={(e) => {
+              setPage(1);
+              setKind(e.target.value as "all" | CodeKind);
+            }}
+          >
+            <option value="all">全部地区</option>
+            {KIND_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <Button
             variant="outline"
             onClick={() => {
@@ -339,7 +519,7 @@ export default function AdminCodesPage() {
               loadData();
             }}
           >
-            查询
+            {loading ? "刷新中..." : "查询"}
           </Button>
         </div>
 
@@ -347,8 +527,10 @@ export default function AdminCodesPage() {
           <TableHeader>
             <TableRow>
               <TableHead>激活码</TableHead>
+              <TableHead>地区</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>使用次数</TableHead>
+              <TableHead>支付订单</TableHead>
               <TableHead>过期时间</TableHead>
               <TableHead>创建时间</TableHead>
             </TableRow>
@@ -357,17 +539,19 @@ export default function AdminCodesPage() {
             {items.map((item) => (
               <TableRow key={item.id}>
                 <TableCell className="font-mono">{item.code}</TableCell>
+                <TableCell>{renderKindLabel(item.kind)}</TableCell>
                 <TableCell>
                   <Badge variant="outline">{item.status}</Badge>
                 </TableCell>
                 <TableCell>{item.usageCount}</TableCell>
+                <TableCell className="font-mono">{item.issuedPaymentOrderId ?? "-"}</TableCell>
                 <TableCell>{item.expiresAt ? new Date(item.expiresAt).toLocaleString() : "-"}</TableCell>
                 <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
               </TableRow>
             ))}
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>

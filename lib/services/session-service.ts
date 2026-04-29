@@ -45,7 +45,7 @@ export const sessionService = {
       throw new AppError("当前会话状态不允许开始接码", "SESSION_INVALID_STATE", 409);
     }
 
-    const acquire = await heroSmsClient.acquireNumber();
+    const acquire = await heroSmsClient.acquireNumber(session.activationCode.kind);
     await smsSessionRepository.updateAcquired(sessionId, {
       activationId: acquire.activationId,
       phoneNumber: acquire.phoneNumber,
@@ -58,7 +58,10 @@ export const sessionService = {
       action: "SESSION_START_RECEIVING",
       entityType: "sms_session",
       entityId: sessionId,
-      metadata: { phoneNumber: acquire.phoneNumber }
+      metadata: {
+        phoneNumber: acquire.phoneNumber,
+        kind: session.activationCode.kind
+      }
     });
 
     return this.getSessionDetail(sessionId, false);
@@ -100,7 +103,7 @@ export const sessionService = {
       );
     }
 
-    const acquire = await heroSmsClient.acquireNumber();
+    const acquire = await heroSmsClient.acquireNumber(session.activationCode.kind);
     await heroSmsClient.cancelActivation(session.providerActivationId);
     await smsSessionRepository.updateAcquired(sessionId, {
       activationId: acquire.activationId,
@@ -114,7 +117,10 @@ export const sessionService = {
       action: "SESSION_CHANGE_NUMBER",
       entityType: "sms_session",
       entityId: sessionId,
-      metadata: { phoneNumber: acquire.phoneNumber }
+      metadata: {
+        phoneNumber: acquire.phoneNumber,
+        kind: session.activationCode.kind
+      }
     });
 
     return this.getSessionDetail(sessionId, false);
@@ -205,6 +211,7 @@ export const sessionService = {
     return {
       sessionId: latest.id,
       activationCode: latest.activationCode.code,
+      activationKind: latest.activationCode.kind,
       phoneNumber: latest.phoneNumber,
       status: latest.status,
       verificationCode: latest.verificationCode,

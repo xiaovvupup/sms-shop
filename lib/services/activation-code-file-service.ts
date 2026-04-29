@@ -18,6 +18,7 @@ export const activationCodeFileService = {
       const rows = await prisma.activationCode.findMany({
         where: {
           status: { notIn: TERMINAL_STATUSES },
+          issuedPaymentOrderId: null,
           OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
         },
         select: {

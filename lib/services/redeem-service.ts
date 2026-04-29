@@ -1,4 +1,4 @@
-import { Prisma, ActivationCodeStatus, SmsSessionStatus } from "@prisma/client";
+import { Prisma, ActivationCodeStatus, PaymentOrderStatus, SmsSessionStatus } from "@prisma/client";
 import { env } from "@/lib/core/env";
 import { AppError } from "@/lib/core/errors";
 import { normalizeActivationCode } from "@/lib/core/utils";
@@ -32,6 +32,9 @@ export const redeemService = {
         const code = await activationCodeRepository.findByCode(activationCode, tx);
         if (!code) {
           throw new AppError("激活码不存在", "CODE_NOT_FOUND", 404);
+        }
+        if (code.issuedPaymentOrder && code.issuedPaymentOrder.status !== PaymentOrderStatus.delivered) {
+          throw new AppError("该激活码对应订单尚未支付完成", "CODE_PAYMENT_PENDING", 409);
         }
         if (code.status === ActivationCodeStatus.disabled) {
           throw new AppError("激活码已禁用", "CODE_DISABLED", 403);

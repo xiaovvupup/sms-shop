@@ -16,6 +16,11 @@ enum ActivationCodeStatus {
   disabled
 }
 
+enum ActivationCodeKind {
+  us
+  uk
+}
+
 enum SmsSessionStatus {
   pending
   number_acquired
@@ -31,9 +36,17 @@ enum AdminRole {
   operator
 }
 
+enum PaymentOrderStatus {
+  pending
+  delivered
+  expired
+  cancelled
+}
+
 model ActivationCode {
   id               String               @id @default(cuid())
   code             String               @unique @db.VarChar(14)
+  kind             ActivationCodeKind   @default(us)
   status           ActivationCodeStatus @default(unused)
   expiresAt        DateTime?
   reservedAt       DateTime?
@@ -43,11 +56,14 @@ model ActivationCode {
   usageCount       Int                  @default(0)
   note             String?              @db.VarChar(120)
   createdByAdminId String?
+  issuedPaymentOrderId String?          @unique
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   sessions         SmsSession[]
+  issuedPaymentOrder PaymentOrder?      @relation("PaymentOrderIssuedCode", fields: [issuedPaymentOrderId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
+  @@index([kind, status, createdAt])
   @@index([expiresAt])
 }
 
@@ -106,6 +122,32 @@ model AdminUser {
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+}
+
+model PaymentOrder {
+  id             String             @id @default(cuid())
+  orderNo        String             @unique @db.VarChar(24)
+  kind           ActivationCodeKind
+  amountFen      Int
+  currency       String             @default("CNY") @db.VarChar(8)
+  status         PaymentOrderStatus @default(pending)
+  paymentChannel String?            @db.VarChar(40)
+  userIp         String?            @db.VarChar(64)
+  expiresAt      DateTime
+  paidAt         DateTime?
+  deliveredAt    DateTime?
+  activationCodeDismissedAt DateTime?
+  cancelledAt    DateTime?
+  providerTradeNo String?           @db.VarChar(120)
+  note           String?            @db.VarChar(120)
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  activationCode ActivationCode?    @relation("PaymentOrderIssuedCode")
+
+  @@index([status, createdAt])
+  @@index([kind, status, createdAt])
+  @@index([expiresAt])
 }
 
 model AuditLog {

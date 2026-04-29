@@ -1,9 +1,11 @@
+import { ActivationCodeKind } from "@prisma/client";
 import { env } from "@/lib/core/env";
 import { auditLogRepository } from "@/lib/repositories/audit-log-repository";
 import { activationCodeRepository } from "@/lib/repositories/activation-code-repository";
 import { adminService } from "@/lib/services/admin-service";
 import { mailService } from "@/lib/services/mail-service";
 import { heroSmsClient } from "@/lib/sms/herosms-client";
+import { getActivationKindDisplayName } from "@/lib/core/activation-kind";
 
 type LowBalanceAlertInput = {
   balance: number;
@@ -65,29 +67,46 @@ export const opsService = {
   },
 
   async runDailyMaintenance() {
-    const unusedBefore = await activationCodeRepository.countAvailableUnused();
+    const kinds: ActivationCodeKind[] = ["us", "uk"];
+    const unusedBeforeByKind = Object.fromEntries(
+      await Promise.all(
+        kinds.map(async (kind) => [kind, await activationCodeRepository.countAvailableUnused(kind)])
+      )
+    ) as Record<ActivationCodeKind, number>;
     let generatedCount = 0;
-    let generatedCodes: string[] = [];
+    const generatedByKind: Partial<Record<ActivationCodeKind, string[]>> = {};
     let generateTriggered = false;
     let generatedMailSent = false;
 
-    if (unusedBefore < env.AUTO_GENERATE_UNUSED_THRESHOLD) {
-      generateTriggered = true;
-      const generated = await adminService.generateCodes({
-        count: env.AUTO_GENERATE_BATCH_SIZE,
-        note: "AUTO_DAILY_REPLENISH"
-      });
-      generatedCount = generated.insertedCount;
-      generatedCodes = generated.codes;
+    for (const kind of kinds) {
+      if (unusedBeforeByKind[kind] < env.AUTO_GENERATE_UNUSED_THRESHOLD) {
+        generateTriggered = true;
+        const generated = await adminService.generateCodes({
+          count: env.AUTO_GENERATE_BATCH_SIZE,
+          kind,
+          note: "AUTO_DAILY_REPLENISH"
+        });
+        generatedCount += generated.insertedCount;
+        generatedByKind[kind] = generated.codes;
+      }
+    }
 
-      const content = generatedCodes.length > 0 ? `${generatedCodes.join("\n")}\n` : "";
+    if (generatedCount > 0) {
+      const content = kinds
+        .flatMap((kind) => {
+          const codes = generatedByKind[kind] ?? [];
+          if (codes.length === 0) return [];
+          return [`# ${getActivationKindDisplayName(kind)}`, ...codes, ""];
+        })
+        .join("\n");
+
       generatedMailSent = await mailService.send({
         subject: `[补码通知] 自动生成激活码 ${generatedCount} 个`,
         text: [
           "系统已执行每日库存巡检并自动补码。",
           "",
-          `触发条件：unused 数量 < ${env.AUTO_GENERATE_UNUSED_THRESHOLD}`,
-          `巡检前 unused：${unusedBefore}`,
+          `触发条件：单地区 unused 数量 < ${env.AUTO_GENERATE_UNUSED_THRESHOLD}`,
+          ...kinds.map((kind) => `巡检前 ${getActivationKindDisplayName(kind)} unused：${unusedBeforeByKind[kind]}`),
           `本次生成：${generatedCount}`,
           "",
           "本次生成的激活码已作为 txt 附件发送。"
@@ -101,7 +120,11 @@ export const opsService = {
       });
     }
 
-    const unusedAfter = await activationCodeRepository.countAvailableUnused();
+    const unusedAfterByKind = Object.fromEntries(
+      await Promise.all(
+        kinds.map(async (kind) => [kind, await activationCodeRepository.countAvailableUnused(kind)])
+      )
+    ) as Record<ActivationCodeKind, number>;
     const balanceResult = await this.checkSmsBalance("daily");
 
     await auditLogRepository.write({
@@ -114,9 +137,10 @@ export const opsService = {
         batchSize: env.AUTO_GENERATE_BATCH_SIZE,
         generateTriggered,
         generatedCount,
+        generatedByKind,
         generatedMailSent,
-        unusedBefore,
-        unusedAfter,
+        unusedBeforeByKind,
+        unusedAfterByKind,
         balance: balanceResult.balance,
         lowBalance: balanceResult.low,
         lowBalanceMailSent: balanceResult.mailSent
@@ -128,9 +152,10 @@ export const opsService = {
       batchSize: env.AUTO_GENERATE_BATCH_SIZE,
       generateTriggered,
       generatedCount,
+      generatedByKind,
       generatedMailSent,
-      unusedBefore,
-      unusedAfter,
+      unusedBeforeByKind,
+      unusedAfterByKind,
       balance: balanceResult.balance,
       lowBalance: balanceResult.low,
       lowBalanceMailSent: balanceResult.mailSent

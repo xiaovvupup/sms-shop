@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { ActivationCodeStatus, SmsSessionStatus } from "@prisma/client";
+import { ActivationCodeKind, ActivationCodeStatus, SmsSessionStatus } from "@prisma/client";
 import { AppError } from "@/lib/core/errors";
 import { generateActivationCode, normalizeActivationCode } from "@/lib/core/utils";
 import { signAdminJwt } from "@/lib/auth/jwt";
@@ -12,6 +12,7 @@ import { activationCodeFileService } from "@/lib/services/activation-code-file-s
 function toCodeDetail(code: {
   id: string;
   code: string;
+  kind: ActivationCodeKind;
   status: ActivationCodeStatus;
   usageCount: number;
   expiresAt: Date | null;
@@ -19,17 +20,20 @@ function toCodeDetail(code: {
   usedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  issuedPaymentOrderId?: string | null;
 }) {
   return {
     id: code.id,
     code: code.code,
+    kind: code.kind,
     status: code.status,
     usageCount: code.usageCount,
     expiresAt: code.expiresAt,
     reservedAt: code.reservedAt,
     usedAt: code.usedAt,
     createdAt: code.createdAt,
-    updatedAt: code.updatedAt
+    updatedAt: code.updatedAt,
+    issuedPaymentOrderId: code.issuedPaymentOrderId ?? null
   };
 }
 
@@ -72,12 +76,13 @@ export const adminService = {
 
   async generateCodes(input: {
     count: number;
+    kind: ActivationCodeKind;
     expiresAt?: string;
     note?: string;
     adminId?: string;
   }) {
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : undefined;
-    const rows: Array<{ code: string; expiresAt?: Date; note?: string; createdByAdminId?: string }> = [];
+    const rows: Array<{ code: string; kind: ActivationCodeKind; expiresAt?: Date; note?: string; createdByAdminId?: string }> = [];
     const generated = new Set<string>();
     while (rows.length < input.count) {
       const code = generateActivationCode();
@@ -85,6 +90,7 @@ export const adminService = {
         generated.add(code);
         rows.push({
           code,
+          kind: input.kind,
           expiresAt,
           note: input.note,
           createdByAdminId: input.adminId
@@ -102,7 +108,8 @@ export const adminService = {
       entityId: "batch",
       metadata: {
         requestedCount: input.count,
-        insertedCount: result.count
+        insertedCount: result.count,
+        kind: input.kind
       }
     });
 
@@ -112,13 +119,15 @@ export const adminService = {
     };
   },
 
-  async listCodes(input: { page: number; pageSize: number; query?: string; status?: string }) {
+  async listCodes(input: { page: number; pageSize: number; query?: string; status?: string; kind?: string }) {
     const status = input.status && input.status !== "all" ? (input.status as ActivationCodeStatus) : undefined;
+    const kind = input.kind ? (input.kind as ActivationCodeKind) : undefined;
     return activationCodeRepository.listPaged({
       page: input.page,
       pageSize: input.pageSize,
       query: input.query,
-      status
+      status,
+      kind
     });
   },
 

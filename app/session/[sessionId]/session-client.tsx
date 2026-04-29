@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 type SessionPayload = {
   sessionId: string;
   activationCode: string;
+  activationKind: "us" | "uk";
   phoneNumber: string | null;
   status: string;
   verificationCode: string | null;
@@ -36,6 +37,10 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 const FAILED_STATUSES = new Set(["timeout", "failed", "cancelled"]);
+const KIND_TEXT: Record<SessionPayload["activationKind"], string> = {
+  us: "美国 🇺🇸",
+  uk: "英国 🇬🇧"
+};
 
 function getStatusVariant(status: string): "default" | "warning" | "danger" | "success" {
   if (status === "code_received") return "success";
@@ -54,6 +59,9 @@ function secondsToClock(totalSeconds: number) {
 function formatFailureReason(reason?: string | null) {
   if (!reason) return "短信接收失败，请稍后重试";
   if (reason === "SESSION_TIMEOUT") return "等待短信超时";
+  if (reason === "SMS_NUMBER_NOT_AVAILABLE" || reason === "SMS 平台没有可用号码") {
+    return "当前所选地区暂时没有可用号码，请稍后再试或更换地区激活码";
+  }
   return reason;
 }
 
@@ -213,7 +221,7 @@ export function SessionClient({
     );
   }
 
-  if (error || !session) {
+  if (!session) {
     return (
       <div className="container-shell">
         <Card className="fade-in-up">
@@ -256,10 +264,10 @@ export function SessionClient({
               </div>
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Button className="h-14 text-xl" onClick={handleStartReceiving} disabled={busyAction !== null}>
+                <Button className="h-14 w-full text-xl" onClick={handleStartReceiving} disabled={busyAction !== null}>
                   {busyAction === "start" ? <Loader2 className="size-4 animate-spin" /> : "开始接收验证码"}
                 </Button>
-                <Link href="/" className="block">
+                <Link href="/" className="block w-full">
                   <Button className="h-14 w-full text-xl" variant="outline">
                     重新输入激活码
                   </Button>
@@ -307,13 +315,16 @@ export function SessionClient({
               </p>
 
               <div className="surface-muted rounded-2xl p-4">
-                <p className="mb-1 text-xs text-muted-foreground">本次接码手机号</p>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  本次接码手机号 44开头为英国🇬🇧（United Kingdom），1开头为美国🇺🇸（United States）
+                </p>
                 <p className="text-4xl font-bold tracking-wide md:text-5xl">{session.phoneNumber ?? "--"}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => copyText(session.phoneNumber)}>
                     <Copy className="size-4" />
                     复制号码
                   </Button>
+                  <Badge variant="outline">{KIND_TEXT[session.activationKind]}</Badge>
                   <Badge variant={getStatusVariant(session.status)}>{STATUS_TEXT[session.status] ?? session.status}</Badge>
                 </div>
               </div>
@@ -378,7 +389,11 @@ export function SessionClient({
               {actionMessage}
             </div>
           ) : null}
-          {error ? <div className="rounded-2xl bg-red-50/90 px-4 py-3 text-sm text-red-600">{error}</div> : null}
+          {error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-600">
+              {formatFailureReason(error)}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </main>

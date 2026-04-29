@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { PrismaClient, AdminRole } from "@prisma/client";
+import { ActivationCodeKind, PrismaClient, AdminRole } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -60,11 +60,14 @@ async function main() {
   }
 
   const existing = await prisma.activationCode.count();
-  if (existing < 10) {
-    const rows = Array.from({ length: 10 }).map(() => ({
-      code: generateActivationCode(),
-      createdByAdminId: admin.id
-    }));
+  if (existing < 20) {
+    const rows = (["us", "uk"] as ActivationCodeKind[]).flatMap((kind) =>
+      Array.from({ length: 10 }).map(() => ({
+        code: generateActivationCode(),
+        kind,
+        createdByAdminId: admin.id
+      }))
+    );
     await prisma.activationCode.createMany({
       data: rows,
       skipDuplicates: true

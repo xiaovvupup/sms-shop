@@ -1,4 +1,4 @@
-import { Prisma, ActivationCodeStatus } from "@prisma/client";
+import { Prisma, ActivationCodeKind, ActivationCodeStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 type Tx = Prisma.TransactionClient;
@@ -33,7 +33,46 @@ export const activationCodeRepository = {
     return db.activationCode.findFirst({
       where: {
         OR: [{ code }, { code: legacy }]
+      },
+      include: {
+        issuedPaymentOrder: true
       }
+    });
+  },
+
+  async findFirstAvailableForKind(kind: ActivationCodeKind, tx?: Tx) {
+    const db = tx ?? prisma;
+    const now = new Date();
+    return db.activationCode.findFirst({
+      where: {
+        kind,
+        status: ActivationCodeStatus.unused,
+        issuedPaymentOrderId: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      },
+      orderBy: { createdAt: "asc" }
+    });
+  },
+
+  async bindToPaymentOrder(id: string, orderId: string, tx: Tx) {
+    const result = await tx.activationCode.updateMany({
+      where: {
+        id,
+        issuedPaymentOrderId: null,
+        status: ActivationCodeStatus.unused
+      },
+      data: {
+        issuedPaymentOrderId: orderId
+      }
+    });
+    return result.count === 1;
+  },
+
+  async releasePaymentOrderBinding(orderId: string, tx?: Tx) {
+    const db = tx ?? prisma;
+    return db.activationCode.updateMany({
+      where: { issuedPaymentOrderId: orderId },
+      data: { issuedPaymentOrderId: null }
     });
   },
 
@@ -113,6 +152,7 @@ export const activationCodeRepository = {
     pageSize: number;
     query?: string;
     status?: ActivationCodeStatus;
+    kind?: ActivationCodeKind;
   }) {
     const where: Prisma.ActivationCodeWhereInput = {
       ...(params.query
@@ -120,7 +160,8 @@ export const activationCodeRepository = {
             OR: [{ code: { contains: params.query, mode: "insensitive" } }, { note: { contains: params.query, mode: "insensitive" } }]
           }
         : {}),
-      ...(params.status ? { status: params.status } : {})
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.kind ? { kind: params.kind } : {})
     };
 
     const [items, total] = await prisma.$transaction([
@@ -141,17 +182,19 @@ export const activationCodeRepository = {
     };
   },
 
-  async countAvailableUnused() {
+  async countAvailableUnused(kind?: ActivationCodeKind) {
     const now = new Date();
     return prisma.activationCode.count({
       where: {
+        ...(kind ? { kind } : {}),
         status: ActivationCodeStatus.unused,
+        issuedPaymentOrderId: null,
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       }
     });
   },
 
-  async createMany(codes: Array<{ code: string; expiresAt?: Date; note?: string; createdByAdminId?: string }>) {
+  async createMany(codes: Array<{ code: string; kind: ActivationCodeKind; expiresAt?: Date; note?: string; createdByAdminId?: string }>) {
     return prisma.activationCode.createMany({
       data: codes,
       skipDuplicates: true

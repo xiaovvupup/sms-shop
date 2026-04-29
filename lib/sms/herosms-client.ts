@@ -1,4 +1,6 @@
+import { ActivationCodeKind } from "@prisma/client";
 import { env } from "@/lib/core/env";
+import { getActivationKindMeta } from "@/lib/core/activation-kind";
 import { AppError } from "@/lib/core/errors";
 import { fetchWithTimeout } from "@/lib/core/timeout";
 import { logger } from "@/lib/core/logger";
@@ -57,10 +59,11 @@ class HeroSmsClient {
     return payload;
   }
 
-  async acquireNumber(): Promise<AcquireResult> {
+  async acquireNumber(kind: ActivationCodeKind): Promise<AcquireResult> {
+    const region = getActivationKindMeta(kind);
     const payload = await this.request("getNumberV2", {
-      service: env.SMS_SERVICE_CODE,
-      country: env.SMS_COUNTRY_CODE,
+      service: region.smsServiceCode,
+      country: region.smsCountryCode,
       maxPrice: env.SMS_MAX_PRICE
     });
 
